@@ -5,6 +5,7 @@ import android.content.Context
 import android.content.Intent
 import android.content.pm.PackageManager
 import android.location.Location
+import android.location.LocationManager
 import android.os.Bundle
 import android.provider.ContactsContract
 import android.telephony.SubscriptionManager
@@ -23,6 +24,8 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.unit.dp
 import androidx.core.app.ActivityCompat
 import androidx.core.content.ContextCompat
+import androidx.core.content.ContextCompat.getSystemService
+import androidx.core.content.ContextCompat.startActivity
 import com.google.android.gms.location.FusedLocationProviderClient
 import com.google.android.gms.location.LocationServices
 import com.google.android.gms.tasks.Task
@@ -73,6 +76,7 @@ class MainActivity : ComponentActivity() {
                                     if (location != null) {
                                         sendLocationAsSMS(location, phoneNumber)
                                     } else {
+                                        promptEnableLocation()
                                         Toast.makeText(this, "Konum alınamadı!", Toast.LENGTH_SHORT).show()
                                     }
                                 }
@@ -87,8 +91,7 @@ class MainActivity : ComponentActivity() {
         setContent {
                 MainScreen(
                     onShareLocationClicked = {
-                        checkAndRequestPermissions()
-                        pickContact() }
+                        checkAndRequestPermissions() }
                 )
         }
     }
@@ -112,7 +115,11 @@ class MainActivity : ComponentActivity() {
         if (permissionsToRequest.isNotEmpty()) {
             requestPermissionLauncher.launch(permissionsToRequest.toTypedArray())
         } else {
-            pickContact()
+            if (isLocationEnabled()){
+                pickContact()
+            }else{
+                promptEnableLocation()
+            }
         }
     }
 
@@ -171,7 +178,26 @@ class MainActivity : ComponentActivity() {
             Toast.makeText(this, "SMS gönderimi başarısız oldu: ${e.message}", Toast.LENGTH_SHORT).show()
         }
     }
+    private fun isLocationEnabled(): Boolean {
+        val locationManager = getSystemService( this,LocationManager::class.java)
+        if (locationManager != null) {
+            return locationManager.isProviderEnabled(LocationManager.GPS_PROVIDER) ||
+                    locationManager.isProviderEnabled(LocationManager.NETWORK_PROVIDER)
+        }else return false
+    }
+    private fun promptEnableLocation() {
+        if (!isLocationEnabled()) {
+            // Konum kapalıysa, kullanıcıyı ayarlara yönlendir
+            val intent = Intent(android.provider.Settings.ACTION_LOCATION_SOURCE_SETTINGS)
+            startActivity(intent)
+        } else {
+            // Konum açıksa, konumu paylaş
+
+        }
+    }
+
 }
+
 
 @Composable
 fun MainScreen(onShareLocationClicked: () -> Unit) {
