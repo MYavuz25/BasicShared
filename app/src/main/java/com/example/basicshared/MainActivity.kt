@@ -6,6 +6,8 @@ import android.content.Intent
 import android.content.pm.PackageManager
 import android.location.Location
 import android.location.LocationManager
+import android.net.ConnectivityManager
+import android.net.NetworkCapabilities
 import android.os.Bundle
 import android.provider.ContactsContract
 import android.telephony.SubscriptionManager
@@ -20,12 +22,9 @@ import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.unit.dp
 import androidx.core.app.ActivityCompat
 import androidx.core.content.ContextCompat
-import androidx.core.content.ContextCompat.getSystemService
-import androidx.core.content.ContextCompat.startActivity
 import com.google.android.gms.location.FusedLocationProviderClient
 import com.google.android.gms.location.LocationServices
 import com.google.android.gms.tasks.Task
@@ -42,6 +41,7 @@ class MainActivity : ComponentActivity() {
 
         fusedLocationClient = LocationServices.getFusedLocationProviderClient(this)
 
+        // İzinleri yönetmek için
         requestPermissionLauncher = registerForActivityResult(
             ActivityResultContracts.RequestMultiplePermissions()
         ) { permissions ->
@@ -51,12 +51,17 @@ class MainActivity : ComponentActivity() {
             val contactsPermissionGranted = permissions[Manifest.permission.READ_CONTACTS] ?: false
 
             if (locationPermissionGranted && smsPermissionGranted && phoneStatePermissionGranted && contactsPermissionGranted) {
-                getLastKnownLocationAndSendSMS()
+                if (isLocationEnabled()) {
+                    pickContact()
+                } else {
+                    promptEnableLocation()
+                }
             } else {
                 Toast.makeText(this, "Gerekli izinler verilmedi!", Toast.LENGTH_SHORT).show()
             }
         }
 
+        // Kişi seçmek için
         pickContactLauncher = registerForActivityResult(ActivityResultContracts.StartActivityForResult()) { result ->
             if (result.resultCode == RESULT_OK) {
                 val data = result.data
@@ -68,34 +73,21 @@ class MainActivity : ComponentActivity() {
                             selectedPhoneNumber = it.getString(phoneNumberIndex).replace(" ", "").replace("-", "")
                         }
                     }
-                    selectedPhoneNumber.takeIf { it.isNotEmpty() }?.let { phoneNumber ->
-                        try {
-                            fusedLocationClient.lastLocation
-                                .addOnCompleteListener { task: Task<Location> ->
-                                    val location: Location? = task.result
-                                    if (location != null) {
-                                        sendLocationAsSMS(location, phoneNumber)
-                                    } else {
-                                        promptEnableLocation()
-                                        Toast.makeText(this, "Konum alınamadı!", Toast.LENGTH_SHORT).show()
-                                    }
-                                }
-                        }catch (e: SecurityException) {
-                            Toast.makeText(this, "Konum erişim hatası: ${e.message}", Toast.LENGTH_SHORT).show()
-                        }
+                    if (selectedPhoneNumber.isNotEmpty()) {
+                        getLastKnownLocationAndSendSMS(selectedPhoneNumber)
                     }
                 }
             }
         }
 
         setContent {
-                MainScreen(
-                    onShareLocationClicked = {
-                        checkAndRequestPermissions() }
-                )
+            MainScreen(
+                onShareLocationClicked = { checkAndRequestPermissions() }
+            )
         }
     }
 
+    // İzinleri kontrol etme ve gerekirse isteme
     private fun checkAndRequestPermissions() {
         val permissions = arrayOf(
             Manifest.permission.READ_PHONE_STATE,
@@ -104,39 +96,42 @@ class MainActivity : ComponentActivity() {
             Manifest.permission.READ_CONTACTS
         )
 
-        val permissionsToRequest = mutableListOf<String>()
-
-        for (permission in permissions) {
-            if (ContextCompat.checkSelfPermission(this, permission) != PackageManager.PERMISSION_GRANTED) {
-                permissionsToRequest.add(permission)
-            }
+        val permissionsToRequest = permissions.filter {
+            ContextCompat.checkSelfPermission(this, it) != PackageManager.PERMISSION_GRANTED
         }
 
         if (permissionsToRequest.isNotEmpty()) {
             requestPermissionLauncher.launch(permissionsToRequest.toTypedArray())
         } else {
-            if (isLocationEnabled()){
-                pickContact()
-            }else{
+            if (!isInternetAvailable()) {
+                Toast.makeText(this, "İnternet bağlantısı yok. Lütfen interneti açın.", Toast.LENGTH_LONG).show()
+                promptEnableInternet()
+            } else if (!isLocationEnabled()) {
+                Toast.makeText(this, "Konumunuz açık değil. Lütfen konumunuzu açın.", Toast.LENGTH_LONG).show()
                 promptEnableLocation()
+            } else {
+                pickContact()
             }
         }
     }
 
+    // Kişi seçme işlemi
     private fun pickContact() {
         val intent = Intent(Intent.ACTION_PICK, ContactsContract.CommonDataKinds.Phone.CONTENT_URI)
         pickContactLauncher.launch(intent)
     }
 
-    private fun getLastKnownLocationAndSendSMS() {
+    // Konumu al ve SMS gönder
+    private fun getLastKnownLocationAndSendSMS(phoneNumber: String) {
         try {
             fusedLocationClient.lastLocation
                 .addOnCompleteListener { task: Task<Location> ->
                     val location: Location? = task.result
-                    if (location != null && selectedPhoneNumber.isNotEmpty()) {
-                        sendLocationAsSMS(location, selectedPhoneNumber)
+                    if (location != null) {
+                        sendLocationAsSMS(location, phoneNumber)
                     } else {
-                        Toast.makeText(this, "Konum alınamadı veya telefon numarası seçilmedi!", Toast.LENGTH_SHORT).show()
+                        promptEnableLocation()
+                        Toast.makeText(this, "Konum alınamadı!", Toast.LENGTH_SHORT).show()
                     }
                 }
         } catch (e: SecurityException) {
@@ -144,6 +139,7 @@ class MainActivity : ComponentActivity() {
         }
     }
 
+    // Konum bilgisini SMS ile gönder
     private fun sendLocationAsSMS(location: Location, phoneNumber: String) {
         if (ActivityCompat.checkSelfPermission(
                 this,
@@ -157,48 +153,56 @@ class MainActivity : ComponentActivity() {
         val message = "Benim konumum: https://maps.google.com/?q=${location.latitude},${location.longitude}"
 
         try {
-            // SIM kart abonelik yöneticisini al
             val subscriptionManager = getSystemService(Context.TELEPHONY_SUBSCRIPTION_SERVICE) as SubscriptionManager
             val subscriptionInfoList = subscriptionManager.activeSubscriptionInfoList
 
-            if (subscriptionInfoList.isEmpty()) {
+            if (subscriptionInfoList.isNotEmpty()) {
+                val subscriptionId = subscriptionInfoList[0].subscriptionId
+                val smsManager = SmsManager.getSmsManagerForSubscriptionId(subscriptionId)
+                smsManager.sendTextMessage(phoneNumber, null, message, null, null)
+                Toast.makeText(this, "Konum başarıyla gönderildi!", Toast.LENGTH_SHORT).show()
+            } else {
                 Toast.makeText(this, "SIM kart bilgisi alınamadı!", Toast.LENGTH_SHORT).show()
-                return
             }
-
-            val subscriptionId = subscriptionInfoList[0].subscriptionId  // Varsayılan SIM
-
-            // SmsManager'ı abonelik ID'sine göre al
-            val smsManager = SmsManager.getSmsManagerForSubscriptionId(subscriptionId)
-
-            // SMS gönder
-            smsManager.sendTextMessage(phoneNumber, null, message, null, null)
-            Toast.makeText(this, "Konum başarıyla gönderildi!", Toast.LENGTH_SHORT).show()
         } catch (e: Exception) {
             Toast.makeText(this, "SMS gönderimi başarısız oldu: ${e.message}", Toast.LENGTH_SHORT).show()
         }
     }
-    private fun isLocationEnabled(): Boolean {
-        val locationManager = getSystemService( this,LocationManager::class.java)
-        if (locationManager != null) {
-            return locationManager.isProviderEnabled(LocationManager.GPS_PROVIDER) ||
-                    locationManager.isProviderEnabled(LocationManager.NETWORK_PROVIDER)
-        }else return false
-    }
-    private fun promptEnableLocation() {
-        if (!isLocationEnabled()) {
-            // Konum kapalıysa, kullanıcıyı ayarlara yönlendir
-            val intent = Intent(android.provider.Settings.ACTION_LOCATION_SOURCE_SETTINGS)
-            startActivity(intent)
-        } else {
-            // Konum açıksa, konumu paylaş
 
+    // Konumun açık olup olmadığını kontrol et
+    private fun isLocationEnabled(): Boolean {
+        val locationManager = getSystemService(Context.LOCATION_SERVICE) as LocationManager
+        return locationManager.isProviderEnabled(LocationManager.GPS_PROVIDER) ||
+                locationManager.isProviderEnabled(LocationManager.NETWORK_PROVIDER)
+    }
+    private fun isInternetAvailable(): Boolean {
+        val connectivityManager = getSystemService(Context.CONNECTIVITY_SERVICE) as ConnectivityManager
+        val activeNetwork = connectivityManager.activeNetwork ?: return false
+        val networkCapabilities = connectivityManager.getNetworkCapabilities(activeNetwork) ?: return false
+        return when {
+            networkCapabilities.hasTransport(NetworkCapabilities.TRANSPORT_WIFI) -> true
+            networkCapabilities.hasTransport(NetworkCapabilities.TRANSPORT_CELLULAR) -> true
+            networkCapabilities.hasTransport(NetworkCapabilities.TRANSPORT_ETHERNET) -> true
+            else -> false
+        }
+    }
+    private fun promptEnableInternet() {
+        if (!isInternetAvailable()){
+            val intent = Intent(android.provider.Settings.ACTION_WIFI_SETTINGS)
+            startActivity(intent)
         }
     }
 
+    // Kullanıcıya konum açması için yönlendirme
+    private fun promptEnableLocation() {
+        if (!isLocationEnabled()) {
+            val intent = Intent(android.provider.Settings.ACTION_LOCATION_SOURCE_SETTINGS)
+            startActivity(intent)
+        }
+    }
 }
 
-
+// Compose UI
 @Composable
 fun MainScreen(onShareLocationClicked: () -> Unit) {
     Surface(
