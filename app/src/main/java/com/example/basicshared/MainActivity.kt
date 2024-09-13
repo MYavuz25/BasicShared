@@ -8,6 +8,7 @@ import android.location.Location
 import android.location.LocationManager
 import android.net.ConnectivityManager
 import android.net.NetworkCapabilities
+import android.net.Uri
 import android.os.Bundle
 import android.provider.ContactsContract
 import android.telephony.SubscriptionManager
@@ -74,7 +75,8 @@ class MainActivity : ComponentActivity() {
                         }
                     }
                     if (selectedPhoneNumber.isNotEmpty()) {
-                        getLastKnownLocationAndSendSMS(selectedPhoneNumber)
+                        //getLastKnownLocationAndSendSMS(selectedPhoneNumber)
+                        getLastKnownLocationAndSendOnWhatsApp(selectedPhoneNumber)
                     }
                 }
             }
@@ -138,6 +140,24 @@ class MainActivity : ComponentActivity() {
             Toast.makeText(this, "Konum erişim hatası: ${e.message}", Toast.LENGTH_SHORT).show()
         }
     }
+    private fun getLastKnownLocationAndSendOnWhatsApp(phoneNumber: String) {
+        try {
+            fusedLocationClient.lastLocation
+                .addOnCompleteListener { task: Task<Location> ->
+                    val location: Location? = task.result
+                    if (location != null) {
+                        val latitude = location.latitude
+                        val longitude = location.longitude
+                        val message = "Benim konumum: https://maps.google.com/?q=$latitude,$longitude"
+                        openWhatsAppChat(phoneNumber, message)
+                    } else {
+                        Toast.makeText(this, "Konum alınamadı!", Toast.LENGTH_SHORT).show()
+                    }
+                }
+        } catch (e: SecurityException) {
+            Toast.makeText(this, "Konum erişim hatası: ${e.message}", Toast.LENGTH_SHORT).show()
+        }
+    }
 
     // Konum bilgisini SMS ile gönder
     private fun sendLocationAsSMS(location: Location, phoneNumber: String) {
@@ -168,6 +188,26 @@ class MainActivity : ComponentActivity() {
             Toast.makeText(this, "SMS gönderimi başarısız oldu: ${e.message}", Toast.LENGTH_SHORT).show()
         }
     }
+    private fun openWhatsAppChat(phoneNumber: String, message: String) {
+        // Telefon numarasının uluslararası formatta olduğundan emin olun
+        val encodedMessage = Uri.encode(message)
+        val uri = "https://api.whatsapp.com/send?phone=$phoneNumber&text=$encodedMessage"
+
+        val sendIntent = Intent(Intent.ACTION_VIEW).apply {
+            data = Uri.parse(uri)
+            setPackage("com.whatsapp")
+        }
+
+        try {
+            startActivity(sendIntent)
+        } catch (e: Exception) {
+            // WhatsApp yüklü değilse veya uygun değilse kullanıcıya bilgi ver
+            Toast.makeText(this, "WhatsApp yüklü değil veya uygun değil!", Toast.LENGTH_SHORT).show()
+        }
+    }
+
+
+
 
     // Konumun açık olup olmadığını kontrol et
     private fun isLocationEnabled(): Boolean {
