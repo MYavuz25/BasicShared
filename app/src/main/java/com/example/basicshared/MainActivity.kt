@@ -23,8 +23,10 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.unit.dp
 import androidx.core.content.ContextCompat
+import androidx.core.location.LocationManagerCompat
 import com.google.android.gms.location.FusedLocationProviderClient
 import com.google.android.gms.location.LocationServices
+
 
 class MainActivity : ComponentActivity() {
 
@@ -88,8 +90,8 @@ class MainActivity : ComponentActivity() {
 
         setContent {
             MainScreen(
-                onShareLocationClicked = { checkAndRequestPermissions() },
-                onShareContactClicked = { checkAndRequestPermissions() }
+                onShareLocationClicked = { checkAndRequestPermissions(true) },
+                onShareContactClicked = { checkAndRequestPermissions(isSharingLocation = false) }
             )
 
             if (isTargetDialogOpen) {
@@ -122,7 +124,7 @@ class MainActivity : ComponentActivity() {
         }
     }
 
-    private fun checkAndRequestPermissions() {
+    private fun checkAndRequestPermissions(isSharingLocation: Boolean) {
         val permissions = arrayOf(
             Manifest.permission.SEND_SMS,
             Manifest.permission.ACCESS_FINE_LOCATION,
@@ -136,17 +138,38 @@ class MainActivity : ComponentActivity() {
         if (permissionsToRequest.isNotEmpty()) {
             requestPermissionLauncher.launch(permissionsToRequest.toTypedArray())
         } else {
-            if (!isInternetAvailable()) {
-                Toast.makeText(this, "İnternet bağlantısı yok. Lütfen interneti açın.", Toast.LENGTH_LONG).show()
-                promptEnableInternet()
-            } else if (!isLocationEnabled()) {
-                Toast.makeText(this, "Konumunuz açık değil. Lütfen konumunuzu açın.", Toast.LENGTH_LONG).show()
-                promptEnableLocation()
+            if (isSharingLocation) {
+                // Konum paylaşımı yapılıyorsa konumun açık olup olmadığını kontrol et
+                if (!isLocationEnabled()) {
+                    Toast.makeText(this, "Konumunuz açık değil. Lütfen konumunuzu açın.", Toast.LENGTH_LONG).show()
+                    promptEnableLocation()
+                } else {
+                    pickContact("select")
+                }
             } else {
+                // Kişi paylaşımı yapılıyorsa sadece kişiyi seç
                 pickContact("select")
             }
         }
     }
+    private fun enableLocationServices() {
+        val locationManager = getSystemService(Context.LOCATION_SERVICE) as LocationManager
+        if (!locationManager.isProviderEnabled(LocationManager.GPS_PROVIDER)) {
+            val locationRequest = LocationRequest.create()
+                .setPriority(LocationRequest.PRIORITY_HIGH_ACCURACY)
+                .setInterval(1000)
+                .setFastestInterval(500)
+
+            val locationCallback = object : LocationCallback() {
+                override fun onLocationResult(locationResult: LocationResult) {
+                    // Handle location updates
+                }
+            }
+
+            locationManager.requestLocationUpdates(locationRequest, locationCallback, null)
+        }
+    }
+
 
     private fun pickContact(type: String) {
         val intent = Intent(Intent.ACTION_PICK, ContactsContract.CommonDataKinds.Phone.CONTENT_URI)
