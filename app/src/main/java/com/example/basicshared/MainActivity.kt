@@ -23,10 +23,8 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.unit.dp
 import androidx.core.content.ContextCompat
-import androidx.core.location.LocationManagerCompat
 import com.google.android.gms.location.FusedLocationProviderClient
 import com.google.android.gms.location.LocationServices
-
 
 class MainActivity : ComponentActivity() {
 
@@ -150,23 +148,6 @@ class MainActivity : ComponentActivity() {
                 // Kişi paylaşımı yapılıyorsa sadece kişiyi seç
                 pickContact("select")
             }
-        }
-    }
-    private fun enableLocationServices() {
-        val locationManager = getSystemService(Context.LOCATION_SERVICE) as LocationManager
-        if (!locationManager.isProviderEnabled(LocationManager.GPS_PROVIDER)) {
-            val locationRequest = LocationRequest.create()
-                .setPriority(LocationRequest.PRIORITY_HIGH_ACCURACY)
-                .setInterval(1000)
-                .setFastestInterval(500)
-
-            val locationCallback = object : LocationCallback() {
-                override fun onLocationResult(locationResult: LocationResult) {
-                    // Handle location updates
-                }
-            }
-
-            locationManager.requestLocationUpdates(locationRequest, locationCallback, null)
         }
     }
 
