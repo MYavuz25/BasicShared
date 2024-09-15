@@ -14,6 +14,7 @@ import android.telephony.SmsManager
 import android.widget.Toast
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
+import androidx.activity.result.ActivityResult
 import androidx.activity.result.ActivityResultLauncher
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.layout.*
@@ -22,81 +23,77 @@ import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.unit.dp
-import androidx.core.content.ContextCompat
 import com.google.android.gms.location.FusedLocationProviderClient
 import com.google.android.gms.location.LocationServices
 
 class MainActivity : ComponentActivity() {
 
     private lateinit var fusedLocationClient: FusedLocationProviderClient
-    private lateinit var requestPermissionLauncher: ActivityResultLauncher<Array<String>>
+    private lateinit var locationPermissionLauncher: ActivityResultLauncher<String>
+    private lateinit var smsPermissionLauncher: ActivityResultLauncher<String>
+    private lateinit var contactsPermissionLauncher: ActivityResultLauncher<String>
     private lateinit var pickContactLauncher: ActivityResultLauncher<Intent>
     private var selectedPhoneNumber by mutableStateOf("")
     private var targetPhoneNumber by mutableStateOf("")
     private var selectedContactName by mutableStateOf("")
     private var isDialogOpen by mutableStateOf(false)
     private var isTargetDialogOpen by mutableStateOf(false)
+    private var currentShareType by mutableStateOf("")
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
 
         fusedLocationClient = LocationServices.getFusedLocationProviderClient(this)
 
-        requestPermissionLauncher = registerForActivityResult(
-            ActivityResultContracts.RequestMultiplePermissions()
-        ) { permissions ->
-            val locationPermissionGranted = permissions[Manifest.permission.ACCESS_FINE_LOCATION] ?: false
-            val smsPermissionGranted = permissions[Manifest.permission.SEND_SMS] ?: false
-            val contactsPermissionGranted = permissions[Manifest.permission.READ_CONTACTS] ?: false
-
-            if (locationPermissionGranted && smsPermissionGranted && contactsPermissionGranted) {
-                if (isLocationEnabled()) {
-                    pickContact("select")
-                } else {
-                    promptEnableLocation()
-                }
+        // Permission launcher for location
+        locationPermissionLauncher = registerForActivityResult(
+            ActivityResultContracts.RequestPermission()
+        ) { isGranted ->
+            if (isGranted) {
+                handleLocationPermissionGranted()
             } else {
-                Toast.makeText(this, "Gerekli izinler verilmedi!", Toast.LENGTH_SHORT).show()
+                Toast.makeText(this, "Konum izni verilmedi!", Toast.LENGTH_SHORT).show()
             }
         }
 
+        // Permission launcher for SMS
+        smsPermissionLauncher = registerForActivityResult(
+            ActivityResultContracts.RequestPermission()
+        ) { isGranted ->
+            if (isGranted) {
+                handleSMSPermissionGranted()
+            } else {
+                Toast.makeText(this, "SMS izni verilmedi!", Toast.LENGTH_SHORT).show()
+            }
+        }
+
+        // Permission launcher for contacts
+        contactsPermissionLauncher = registerForActivityResult(
+            ActivityResultContracts.RequestPermission()
+        ) { isGranted ->
+            if (isGranted) {
+                pickContact()
+            } else {
+                Toast.makeText(this, "Kişiler izni verilmedi!", Toast.LENGTH_SHORT).show()
+            }
+        }
         pickContactLauncher = registerForActivityResult(ActivityResultContracts.StartActivityForResult()) { result ->
-            if (result.resultCode == RESULT_OK) {
-                val data = result.data
-                data?.data?.let { uri ->
-                    val cursor = contentResolver.query(uri, null, null, null, null)
-                    cursor?.use {
-                        if (it.moveToFirst()) {
-                            val phoneNumberIndex = it.getColumnIndex(ContactsContract.CommonDataKinds.Phone.NUMBER)
-                            val contactNameIndex = it.getColumnIndex(ContactsContract.CommonDataKinds.Phone.DISPLAY_NAME)
-                            val phoneNumber = it.getString(phoneNumberIndex).replace(" ", "").replace("-", "")
-                            val contactName = it.getString(contactNameIndex)
-
-                            if (selectedPhoneNumber.isEmpty()) {
-                                selectedPhoneNumber = phoneNumber
-                                selectedContactName = contactName
-                                isTargetDialogOpen = true // Target seçmek için dialog'u aç
-                            } else {
-                                targetPhoneNumber = phoneNumber
-                                isDialogOpen = true // Paylaşım yöntemini seçmek için dialog'u aç
-                            }
-                        }
-                    }
-                }
-            }
+            handleContactResult(result)
         }
+
 
         setContent {
             MainScreen(
-                onShareLocationClicked = { checkAndRequestPermissions(true) },
-                onShareContactClicked = { checkAndRequestPermissions(isSharingLocation = false) }
+                onShareLocationClicked = { checkAndRequestPermissions("location") },
+                onShareContactClicked = { checkAndRequestPermissions("contact") }
             )
 
             if (isTargetDialogOpen) {
                 TargetContactDialog(
-                    onDismiss = { isTargetDialogOpen = false },
+                    onDismiss = { isTargetDialogOpen = false
+                                resetData()},
                     onConfirm = {
-                        pickContact("target")
+                        pickContact()
                         isTargetDialogOpen = false
                     }
                 )
@@ -104,65 +101,167 @@ class MainActivity : ComponentActivity() {
 
             if (isDialogOpen) {
                 ShareOptionsDialog(
-                    onDismiss = { isDialogOpen = false },
+                    onDismiss = { isDialogOpen = false
+                                resetData()},
                     onShareViaSMS = {
-                        shareViaSMS(targetPhoneNumber, selectedContactName,selectedPhoneNumber)
+                        smsPermissionLauncher.launch(Manifest.permission.SEND_SMS)
                         isDialogOpen = false
-                        selectedPhoneNumber = ""
-                        targetPhoneNumber = ""
                     },
                     onShareViaWhatsApp = {
-                        shareViaWhatsApp(targetPhoneNumber, selectedContactName,selectedPhoneNumber)
+                        handleWhatsAppPermissionGranted()
                         isDialogOpen = false
-                        selectedPhoneNumber = ""
-                        targetPhoneNumber = ""
                     }
                 )
             }
         }
     }
 
-    private fun checkAndRequestPermissions(isSharingLocation: Boolean) {
-        val permissions = arrayOf(
-            Manifest.permission.SEND_SMS,
-            Manifest.permission.ACCESS_FINE_LOCATION,
-            Manifest.permission.READ_CONTACTS
-        )
+    private fun resetData() {
+        selectedContactName = ""
+        selectedPhoneNumber = ""
+        targetPhoneNumber = ""
+    }
 
-        val permissionsToRequest = permissions.filter {
-            ContextCompat.checkSelfPermission(this, it) != PackageManager.PERMISSION_GRANTED
-        }
+    private fun handleContactResult(result: ActivityResult) {
+        if (result.resultCode == RESULT_OK) {
+            val data = result.data
+            data?.data?.let { uri ->
+                val cursor = contentResolver.query(uri, null, null, null, null)
+                cursor?.use {
+                    if (it.moveToFirst()) {
+                        val phoneNumberIndex = it.getColumnIndex(ContactsContract.CommonDataKinds.Phone.NUMBER)
+                        val contactNameIndex = it.getColumnIndex(ContactsContract.CommonDataKinds.Phone.DISPLAY_NAME)
+                        val phoneNumber = it.getString(phoneNumberIndex).replace(" ", "").replace("-", "")
+                        val contactName = it.getString(contactNameIndex)
 
-        if (permissionsToRequest.isNotEmpty()) {
-            requestPermissionLauncher.launch(permissionsToRequest.toTypedArray())
-        } else {
-            if (isSharingLocation) {
-                // Konum paylaşımı yapılıyorsa konumun açık olup olmadığını kontrol et
-                if (!isLocationEnabled()) {
-                    Toast.makeText(this, "Konumunuz açık değil. Lütfen konumunuzu açın.", Toast.LENGTH_LONG).show()
-                    promptEnableLocation()
-                } else {
-                    pickContact("select")
+                        when (currentShareType) {
+                            "contact" -> {
+                                if (selectedPhoneNumber.isEmpty()) {
+                                    selectedPhoneNumber = phoneNumber
+                                    selectedContactName = contactName
+                                    isTargetDialogOpen = true
+                                } else {
+                                    targetPhoneNumber = phoneNumber
+                                    isDialogOpen = true
+                                }
+                            }
+                            "location" -> {
+                                targetPhoneNumber = phoneNumber
+                                isDialogOpen = true
+                            }
+                        }
+                    }
                 }
-            } else {
-                // Kişi paylaşımı yapılıyorsa sadece kişiyi seç
-                pickContact("select")
+            }
+        }
+    }
+    private fun checkAndRequestPermissions(shareType: String) {
+        currentShareType=shareType
+        when (shareType) {
+            "location" -> locationPermissionLauncher.launch(Manifest.permission.ACCESS_FINE_LOCATION)
+            "contact" -> contactsPermissionLauncher.launch(Manifest.permission.READ_CONTACTS)
+            "sms" -> smsPermissionLauncher.launch(Manifest.permission.SEND_SMS)
+        }
+    }
+
+    private fun handleLocationPermissionGranted() {
+        if (isLocationEnabled()) {
+            isTargetDialogOpen=true
+        } else {
+            promptEnableLocation()
+        }
+    }
+
+    private fun handleSMSPermissionGranted() {
+        when (currentShareType) {
+            "contact" -> {
+                if (targetPhoneNumber.isNotEmpty() && selectedContactName.isNotEmpty() && selectedPhoneNumber.isNotEmpty()) {
+                    shareViaSMS(targetPhoneNumber, selectedContactName, selectedPhoneNumber)
+                } else {
+                    Toast.makeText(this, "Kişi paylaşımı için gerekli bilgiler eksik!", Toast.LENGTH_SHORT).show()
+                }
+            }
+            "location" -> {
+                if (targetPhoneNumber.isNotEmpty()) {
+                    // You might need to modify the message for location sharing if different
+                    shareLocationViaSMS(targetPhoneNumber)
+                } else {
+                    Toast.makeText(this, "Konum paylaşımı için hedef telefon numarası eksik!", Toast.LENGTH_SHORT).show()
+                }
+            }
+        }
+    }
+    private fun handleWhatsAppPermissionGranted() {
+        when (currentShareType) {
+            "contact" -> {
+                if (targetPhoneNumber.isNotEmpty() && selectedContactName.isNotEmpty() && selectedPhoneNumber.isNotEmpty()) {
+                    shareViaWhatsApp(targetPhoneNumber, selectedContactName, selectedPhoneNumber)
+                } else {
+                    Toast.makeText(this, "Kişi paylaşımı için gerekli bilgiler eksik!", Toast.LENGTH_SHORT).show()
+                }
+            }
+            "location" -> {
+                if (targetPhoneNumber.isNotEmpty()) {
+                    shareLocationViaWhatsApp(targetPhoneNumber)  // Konum paylaşımı
+                } else {
+                    Toast.makeText(this, "Konum paylaşımı için hedef telefon numarası eksik!", Toast.LENGTH_SHORT).show()
+                }
             }
         }
     }
 
+    private fun shareLocationViaSMS(phoneNumber: String) {
+        if (checkSelfPermission(Manifest.permission.ACCESS_FINE_LOCATION) == PackageManager.PERMISSION_GRANTED) {
+            fusedLocationClient.lastLocation
+                .addOnSuccessListener { location ->
+                    if (location != null) {
+                        val message = "Konumum: https://maps.google.com/?q=${location.latitude},${location.longitude}"
+                        sendSMS(phoneNumber, message)
+                    } else {
+                        Toast.makeText(this, "Konum alınamadı!", Toast.LENGTH_SHORT).show()
+                    }
+                }
+                .addOnFailureListener {
+                    Toast.makeText(this, "Konum alınırken bir hata oluştu!", Toast.LENGTH_SHORT).show()
+                }
+        } else {
+            locationPermissionLauncher.launch(Manifest.permission.ACCESS_FINE_LOCATION)
+        }
 
-    private fun pickContact(type: String) {
+    }
+    private fun shareLocationViaWhatsApp(phoneNumber: String) {
+        if (checkSelfPermission(Manifest.permission.ACCESS_FINE_LOCATION) == PackageManager.PERMISSION_GRANTED) {
+            fusedLocationClient.lastLocation
+                .addOnSuccessListener { location ->
+                    if (location != null) {
+                        val message = "Konumumu paylaş: https://maps.google.com/?q=${location.latitude},${location.longitude}"
+                        openWhatsAppChat(phoneNumber, message)
+                    } else {
+                        Toast.makeText(this, "Konum alınamadı!", Toast.LENGTH_SHORT).show()
+                    }
+                }
+                .addOnFailureListener {
+                    Toast.makeText(this, "Konum alınırken bir hata oluştu!", Toast.LENGTH_SHORT).show()
+                }
+        } else {
+            locationPermissionLauncher.launch(Manifest.permission.ACCESS_FINE_LOCATION)
+        }
+    }
+
+
+
+
+    private fun pickContact() {
         val intent = Intent(Intent.ACTION_PICK, ContactsContract.CommonDataKinds.Phone.CONTENT_URI)
         pickContactLauncher.launch(intent)
     }
 
-    private fun shareViaWhatsApp(phoneNumber: String, contactName: String,contactPhoneNumber:String) {
+    private fun shareViaWhatsApp(phoneNumber: String, contactName: String, contactPhoneNumber: String) {
         val message = "Bu kişiyle iletişime geç: $contactName : $contactPhoneNumber"
         openWhatsAppChat(phoneNumber, message)
     }
 
-    private fun shareViaSMS(phoneNumber: String, contactName: String,selectedPhoneNumber : String) {
+    private fun shareViaSMS(phoneNumber: String, contactName: String, selectedPhoneNumber: String) {
         val message = "Bu kişiyle iletişime geç: $contactName : $selectedPhoneNumber"
         sendSMS(phoneNumber, message)
     }
@@ -178,18 +277,19 @@ class MainActivity : ComponentActivity() {
     }
 
     private fun openWhatsAppChat(phoneNumber: String, message: String) {
-        val encodedMessage = Uri.encode(message)
-        val uri = "https://api.whatsapp.com/send?phone=$phoneNumber&text=$encodedMessage"
-        val sendIntent = Intent(Intent.ACTION_VIEW).apply {
-            data = Uri.parse(uri)
-            setPackage("com.whatsapp")
-        }
+        val formattedPhoneNumber = phoneNumber.replace(" ", "").replace("-", "")
+        val uri = "https://api.whatsapp.com/send?phone=$formattedPhoneNumber&text=${Uri.encode(message)}"
+
+        val sendIntent = Intent(Intent.ACTION_VIEW, Uri.parse(uri))
+        sendIntent.setPackage("com.whatsapp")
+
         try {
             startActivity(sendIntent)
         } catch (e: Exception) {
             Toast.makeText(this, "WhatsApp yüklü değil veya uygun değil!", Toast.LENGTH_SHORT).show()
         }
     }
+
 
     private fun isLocationEnabled(): Boolean {
         val locationManager = getSystemService(Context.LOCATION_SERVICE) as LocationManager
@@ -207,14 +307,6 @@ class MainActivity : ComponentActivity() {
             else -> false
         }
     }
-
-    private fun promptEnableInternet() {
-        if (!isInternetAvailable()) {
-            val intent = Intent(android.provider.Settings.ACTION_WIFI_SETTINGS)
-            startActivity(intent)
-        }
-    }
-
     private fun promptEnableLocation() {
         if (!isLocationEnabled()) {
             val intent = Intent(android.provider.Settings.ACTION_LOCATION_SOURCE_SETTINGS)
@@ -223,7 +315,6 @@ class MainActivity : ComponentActivity() {
     }
 }
 
-// Compose UI for main screen
 @Composable
 fun MainScreen(onShareLocationClicked: () -> Unit, onShareContactClicked: () -> Unit) {
     Surface(
@@ -263,8 +354,8 @@ fun MainScreen(onShareLocationClicked: () -> Unit, onShareContactClicked: () -> 
 // Dialog for selecting target contact
 @Composable
 fun TargetContactDialog(
-    onDismiss: () -> Unit,   // Dialog'u kapatmak için fonksiyon
-    onConfirm: () -> Unit   // Target kişiyi seçmek için fonksiyon
+    onDismiss: () -> Unit,
+    onConfirm: () -> Unit
 ) {
     AlertDialog(
         onDismissRequest = { onDismiss() },
@@ -273,7 +364,6 @@ fun TargetContactDialog(
         confirmButton = {
             TextButton(onClick = {
                 onConfirm()
-                onDismiss()  // İşlem bittikten sonra dialog'u kapat
             }) {
                 Text(text = "Tamam")
             }
@@ -302,7 +392,6 @@ fun ShareOptionsDialog(
         confirmButton = {
             TextButton(onClick = {
                 onShareViaSMS()
-                onDismiss()
             }) {
                 Text(text = "SMS ile Paylaş")
             }
@@ -310,12 +399,9 @@ fun ShareOptionsDialog(
         dismissButton = {
             TextButton(onClick = {
                 onShareViaWhatsApp()
-                onDismiss()
             }) {
                 Text(text = "WhatsApp ile Paylaş")
             }
         }
     )
 }
-
-
