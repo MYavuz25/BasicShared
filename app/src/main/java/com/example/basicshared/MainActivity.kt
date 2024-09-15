@@ -172,10 +172,8 @@ class MainActivity : ComponentActivity() {
                 promptEnableLocation()
             }
         }else{
-            println("çalışıyor")
             promptEnableInternet()
         }
-
     }
 
     private fun handleSMSPermissionGranted() {
