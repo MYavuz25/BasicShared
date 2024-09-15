@@ -165,11 +165,17 @@ class MainActivity : ComponentActivity() {
     }
 
     private fun handleLocationPermissionGranted() {
-        if (isLocationEnabled()) {
-            isTargetDialogOpen=true
-        } else {
-            promptEnableLocation()
+        if (isInternetAvailable()){
+            if (isLocationEnabled()) {
+                isTargetDialogOpen=true
+            } else {
+                promptEnableLocation()
+            }
+        }else{
+            println("çalışıyor")
+            promptEnableInternet()
         }
+
     }
 
     private fun handleSMSPermissionGranted() {
@@ -227,7 +233,7 @@ class MainActivity : ComponentActivity() {
         } else {
             locationPermissionLauncher.launch(Manifest.permission.ACCESS_FINE_LOCATION)
         }
-
+        resetData()
     }
     private fun shareLocationViaWhatsApp(phoneNumber: String) {
         if (checkSelfPermission(Manifest.permission.ACCESS_FINE_LOCATION) == PackageManager.PERMISSION_GRANTED) {
@@ -246,6 +252,7 @@ class MainActivity : ComponentActivity() {
         } else {
             locationPermissionLauncher.launch(Manifest.permission.ACCESS_FINE_LOCATION)
         }
+        resetData()
     }
 
 
@@ -259,11 +266,13 @@ class MainActivity : ComponentActivity() {
     private fun shareViaWhatsApp(phoneNumber: String, contactName: String, contactPhoneNumber: String) {
         val message = "Bu kişiyle iletişime geç: $contactName : $contactPhoneNumber"
         openWhatsAppChat(phoneNumber, message)
+        resetData()
     }
 
     private fun shareViaSMS(phoneNumber: String, contactName: String, selectedPhoneNumber: String) {
         val message = "Bu kişiyle iletişime geç: $contactName : $selectedPhoneNumber"
         sendSMS(phoneNumber, message)
+        resetData()
     }
 
     private fun sendSMS(phoneNumber: String, message: String) {
@@ -312,6 +321,10 @@ class MainActivity : ComponentActivity() {
             val intent = Intent(android.provider.Settings.ACTION_LOCATION_SOURCE_SETTINGS)
             startActivity(intent)
         }
+    }
+    private fun promptEnableInternet(){
+            val intent = Intent(android.provider.Settings.ACTION_WIFI_SETTINGS)
+            startActivity(intent)
     }
 }
 
