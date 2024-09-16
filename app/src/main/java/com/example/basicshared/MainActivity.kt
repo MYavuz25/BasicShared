@@ -18,6 +18,7 @@ import androidx.activity.result.ActivityResult
 import androidx.activity.result.ActivityResultLauncher
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.layout.*
+import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
@@ -339,30 +340,42 @@ fun MainScreen(onShareLocationClicked: () -> Unit, onShareContactClicked: () -> 
             verticalArrangement = Arrangement.Center,
             horizontalAlignment = Alignment.CenterHorizontally
         ) {
+            Text(
+                text = "Paylaşım Yap",
+                style = MaterialTheme.typography.headlineLarge,
+                color = MaterialTheme.colorScheme.onBackground,
+                modifier = Modifier.padding(bottom = 32.dp)
+            )
+
             Button(
                 onClick = { onShareLocationClicked() },
-                modifier = Modifier.padding(16.dp),
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(vertical = 8.dp),
                 colors = ButtonDefaults.buttonColors(
-                    containerColor = MaterialTheme.colorScheme.primaryContainer
-                )
+                    containerColor = MaterialTheme.colorScheme.primary
+                ),
+                shape = RoundedCornerShape(10.dp)
             ) {
-                Text(text = "Konumu Paylaş")
+                Text(text = "Konumu Paylaş", style = MaterialTheme.typography.bodyMedium)
             }
 
             Button(
                 onClick = { onShareContactClicked() },
-                modifier = Modifier.padding(16.dp),
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(vertical = 8.dp),
                 colors = ButtonDefaults.buttonColors(
-                    containerColor = MaterialTheme.colorScheme.secondaryContainer
-                )
+                    containerColor = MaterialTheme.colorScheme.secondary
+                ),
+                shape = RoundedCornerShape(10.dp)
             ) {
-                Text(text = "Kişiyi Paylaş")
+                Text(text = "Kişiyi Paylaş", style = MaterialTheme.typography.bodyMedium)
             }
         }
     }
 }
 
-// Dialog for selecting target contact
 @Composable
 fun TargetContactDialog(
     onDismiss: () -> Unit,
@@ -370,24 +383,34 @@ fun TargetContactDialog(
 ) {
     AlertDialog(
         onDismissRequest = { onDismiss() },
-        title = { Text(text = "Hedef Kişiyi Seçin") },
-        text = { Text(text = "Lütfen paylaşmak istediğiniz kişiyi seçin.") },
+        title = {
+            Text(
+                text = "Hedef Kişiyi Seçin",
+                style = MaterialTheme.typography.headlineLarge,
+                color = MaterialTheme.colorScheme.primary
+            )
+        },
+        text = {
+            Text(
+                text = "Lütfen paylaşmak istediğiniz kişiyi seçin.",
+                style = MaterialTheme.typography.bodyMedium,
+                color = MaterialTheme.colorScheme.onBackground
+            )
+        },
         confirmButton = {
             TextButton(onClick = {
                 onConfirm()
             }) {
-                Text(text = "Tamam")
+                Text(text = "Tamam", color = MaterialTheme.colorScheme.primary)
             }
         },
         dismissButton = {
             TextButton(onClick = { onDismiss() }) {
-                Text(text = "İptal")
+                Text(text = "İptal", color = MaterialTheme.colorScheme.secondary)
             }
         }
     )
 }
-
-// Dialog for share options
 @Composable
 fun ShareOptionsDialog(
     onDismiss: () -> Unit,
@@ -395,24 +418,60 @@ fun ShareOptionsDialog(
     onShareViaWhatsApp: () -> Unit
 ) {
     AlertDialog(
-        onDismissRequest = {
-            onDismiss()
+        onDismissRequest = { onDismiss() },
+        title = {
+            Text(
+                text = "Paylaşım Yöntemi Seçin",
+                style = MaterialTheme.typography.headlineLarge,
+                color = MaterialTheme.colorScheme.primary
+            )
         },
-        title = { Text(text = "Paylaşım Yöntemi Seçin") },
-        text = { Text(text = "Bu kişiyi nasıl paylaşmak istersiniz?") },
+        text = {
+            Text(
+                text = "Bu kişiyi nasıl paylaşmak istersiniz?",
+                style = MaterialTheme.typography.bodyMedium,
+                color = MaterialTheme.colorScheme.onBackground
+            )
+        },
         confirmButton = {
-            TextButton(onClick = {
-                onShareViaSMS()
-            }) {
-                Text(text = "SMS ile Paylaş")
+            Column(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(16.dp)
+            ) {
+                Button(
+                    onClick = { onShareViaSMS() },
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(vertical = 8.dp),
+                    colors = ButtonDefaults.buttonColors(
+                        containerColor = MaterialTheme.colorScheme.primary
+                    ),
+                    shape = RoundedCornerShape(10.dp)
+                ) {
+                    Text(text = "SMS ile Paylaş", style = MaterialTheme.typography.bodyMedium)
+                }
+
+                Button(
+                    onClick = { onShareViaWhatsApp() },
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(vertical = 8.dp),
+                    colors = ButtonDefaults.buttonColors(
+                        containerColor = MaterialTheme.colorScheme.secondary
+                    ),
+                    shape = RoundedCornerShape(10.dp)
+                ) {
+                    Text(text = "WhatsApp ile Paylaş", style = MaterialTheme.typography.bodyMedium)
+                }
             }
         },
         dismissButton = {
-            TextButton(onClick = {
-                onShareViaWhatsApp()
-            }) {
-                Text(text = "WhatsApp ile Paylaş")
+            TextButton(onClick = { onDismiss() }) {
+                Text(text = "İptal", color = MaterialTheme.colorScheme.secondary)
             }
         }
     )
 }
+
+
